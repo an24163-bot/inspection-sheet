@@ -1,0 +1,44 @@
+{
+  "atech": {
+    "name": "에이텍솔루션",
+    "template": "template_atech.xlsx",
+    "concentricity_count": 8,
+    "has_equip_no": true,
+    "spec": {
+      "size_lo": 0.44,
+      "size_hi": 0.46,
+      "round_max": 0.02,
+      "round_avg": null,
+      "pos_max": 0.10,
+      "conc_max": 0.10,
+      "conc_avg": null
+    },
+    "spec_text": {
+      "size":  "0.45±0.01",
+      "round": "<0.02",
+      "pos":   "Result (<0.10)",
+      "conc":  "Result (<0.10)"
+    }
+  },
+  "solmix": {
+    "name": "솔믹스",
+    "template": "template_solmix.xlsx",
+    "concentricity_count": 7,
+    "has_equip_no": false,
+    "spec": {
+      "size_lo": 0.44,
+      "size_hi": 0.46,
+      "round_max": 0.02,
+      "round_avg": 0.01,
+      "pos_max": 0.30,
+      "conc_max": 0.20,
+      "conc_avg": 0.15
+    },
+    "spec_text": {
+      "size":  "0.45±0.01",
+      "round": "최대 ≤ 0.02 , 평균 ≤ 0.01",
+      "pos":   "결과 ( 최대 ≤ 0.3 )",
+      "conc":  "결과 ( 최대 ≤ 0.2 , 평균 ≤ 0.15 )"
+    }
+  }
+}

@@ -1,0 +1,3 @@
+libreoffice
+fonts-noto-cjk
+fonts-nanum
