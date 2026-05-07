@@ -121,6 +121,15 @@ st.caption("폴더명에서 자동 추출되는 항목은 미리 채워둡니다
 
 today_kr = datetime.now().strftime("%Y.%-m.%-d") if os.name != "nt" else datetime.now().strftime("%Y.%#m.%#d")
 
+def _sanitize_filename(name: str) -> str:
+    """Windows 파일명 금지 문자 제거 + 앞뒤 공백/점 정리. 빈 문자열은 그대로 둔다."""
+    if name is None:
+        return ""
+    s = str(name).strip()
+    s = re.sub(r'[\\/:*?"<>|]', "", s)
+    s = re.sub(r"\.(pdf|xlsx|zip)$", "", s, flags=re.I)
+    return s.strip(" .")
+
 default_rows = []
 for folder in candidate_folders:
     name = os.path.basename(folder)
@@ -128,6 +137,7 @@ for folder in candidate_folders:
     m_no = re.match(r"(\d+)", name)
     folder_num = m_no.group(1) if m_no else ""
     yymm = datetime.now().strftime("%y%m")
+    default_filename = name.replace("#", "no").replace(" ", "_")
     default_rows.append({
         "folder": name,
         "product_name":    "Si-AT01-1581660",
@@ -139,6 +149,7 @@ for folder in candidate_folders:
         "insp_name":       default_insp,
         "conf_name":       default_conf,
         "appr_name":       default_appr,
+        "pdf_filename":    default_filename,
     })
 
 df = pd.DataFrame(default_rows)
@@ -155,20 +166,52 @@ edited = st.data_editor(
         "insp_name":       st.column_config.TextColumn("검사자"),
         "conf_name":       st.column_config.TextColumn("확인자"),
         "appr_name":       st.column_config.TextColumn("승인자"),
+        "pdf_filename":    st.column_config.TextColumn(
+            "📄 파일명 (확장자 제외)",
+            help="비우면 폴더명을 자동 변환한 기본값 사용. PDF·Excel 모두 동일 이름.",
+        ),
     },
 )
 
 st.header("3️⃣ 검사성적서 생성")
-go = st.button("🚀 PDF 생성하기", type="primary", use_container_width=True)
-if not go:
+
+zip_basename = os.path.splitext(up.name)[0]
+
+st.markdown("**📁 합본 파일명** _(확장자 제외, 비우면 기본값 사용)_")
+col_m, col_x = st.columns(2)
+merged_filename = col_m.text_input(
+    "합본 PDF",
+    value=f"검사성적서_{zip_basename}",
+    help="모든 검사성적서를 하나로 합친 PDF 파일의 이름",
+)
+xlsx_zip_filename = col_x.text_input(
+    "엑셀 모음 ZIP",
+    value=f"검사성적서_엑셀_{zip_basename}",
+    help="개별 검사성적서 엑셀 파일들을 모은 ZIP 의 이름",
+)
+
+col_pv, col_go = st.columns(2)
+preview = col_pv.button("🔍 미리보기 (첫 1건만)", use_container_width=True,
+                          help="첫 폴더 한 건만 빠르게 PDF로 만들어 미리보기. 양식·수치 확인용.")
+go = col_go.button("🚀 PDF 전체 생성", type="primary", use_container_width=True,
+                     help="모든 폴더를 처리하고 합본 PDF 까지 생성합니다.")
+
+if not preview and not go:
+    st.info("👆 미리보기로 양식부터 확인해 보세요. 괜찮으면 옆의 PDF 전체 생성 클릭.")
     st.stop()
+
+is_preview = preview and not go
+records = edited.to_dict("records")
+if is_preview:
+    records = records[:1]
+    st.info("🔍 미리보기 모드 — 첫 폴더 1건만 빠르게 처리합니다.")
 
 out_dir = os.path.join(work, "out")
 os.makedirs(out_dir, exist_ok=True)
 
 results = []
 prog = st.progress(0.0, text="처리 시작...")
-for i, row in enumerate(edited.to_dict("records")):
+for i, row in enumerate(records):
     folder_path = next((f for f in candidate_folders
                         if os.path.basename(f) == row["folder"]), None)
     if not folder_path:
@@ -179,14 +222,11 @@ for i, row in enumerate(edited.to_dict("records")):
         stats = compute_stats(folder_path)
         stats["S1_SIZE_PF"] = "PASS" if (spec_size_lo <= stats["Size"]["MIN"]
                                           and stats["Size"]["MAX"] <= spec_size_hi) else "FAIL"
-        # Roundness — MAX 조건 + (선택) AVG 조건
         rnd_ok = stats["Round"]["MAX"] <= spec_round_max
         if spec_round_avg is not None:
             rnd_ok = rnd_ok and stats["Round"]["AVG"] <= spec_round_avg
         stats["S1_RND_PF"]  = "PASS" if rnd_ok else "FAIL"
-        # Position
         stats["S2_POS_PF"]  = "PASS" if stats["Pos"]["MAX"] <= spec_pos_max else "FAIL"
-        # Concentricity — vendor 의 conc_count 만큼만, AVG 조건 포함
         conc_used = [c for c in stats["Conc"][:conc_count] if c is not None]
         if conc_used:
             conc_ok = max(conc_used) <= spec_conc_max
@@ -197,11 +237,14 @@ for i, row in enumerate(edited.to_dict("records")):
         stats["S3_CONC_PF"] = "PASS" if conc_ok else "FAIL"
 
         prog.progress((i + 0.6) / len(edited), text=f"PDF 생성 중: {row['folder']}")
-        safe = row["folder"].replace("#", "no").replace(" ", "_")
+        user_filename = _sanitize_filename(row.get("pdf_filename", ""))
+        if not user_filename:
+            user_filename = row["folder"].replace("#", "no").replace(" ", "_")
+        safe = user_filename
         xlsx_out = os.path.join(out_dir, f"{safe}.xlsx")
         fill_template(template_path, xlsx_out, stats, row)
         pdf_out = xlsx_to_pdf(xlsx_out, out_dir)
-        results.append({"folder": row["folder"], "ok": True,
+        results.append({"folder": row["folder"], "ok": True, "safe": safe,
                         "stats": stats, "pdf": pdf_out, "xlsx": xlsx_out})
     except Exception as e:
         results.append({"folder": row["folder"], "ok": False, "error": str(e)})
@@ -216,10 +259,10 @@ for fn in os.listdir(out_dir):
 pdfs = [r["pdf"] for r in results if r.get("ok") and r.get("pdf")]
 date_tag = datetime.now().strftime("%Y-%m-%d")
 
-# 업로드한 ZIP 파일명(확장자 제외) 을 출력 파일명에 사용
-zip_basename = os.path.splitext(up.name)[0]
-merged_name = f"검사성적서_{zip_basename}.pdf"
-xlsx_zip_name = f"검사성적서_엑셀_{zip_basename}.zip"
+_m = _sanitize_filename(merged_filename) or f"검사성적서_{zip_basename}"
+_x = _sanitize_filename(xlsx_zip_filename) or f"검사성적서_엑셀_{zip_basename}"
+merged_name   = f"{_m}.pdf"
+xlsx_zip_name = f"{_x}.zip"
 
 merged = os.path.join(out_dir, merged_name)
 if len(pdfs) > 1:
@@ -228,10 +271,11 @@ elif len(pdfs) == 1:
     shutil.copyfile(pdfs[0], merged)
 
 all_xlsx_zip = os.path.join(out_dir, xlsx_zip_name)
-with zipfile.ZipFile(all_xlsx_zip, "w", zipfile.ZIP_DEFLATED) as zf:
-    for r in results:
-        if r.get("ok") and r.get("xlsx"):
-            zf.write(r["xlsx"], arcname=os.path.basename(r["xlsx"]))
+if not is_preview:
+    with zipfile.ZipFile(all_xlsx_zip, "w", zipfile.ZIP_DEFLATED) as zf:
+        for r in results:
+            if r.get("ok") and r.get("xlsx"):
+                zf.write(r["xlsx"], arcname=os.path.basename(r["xlsx"]))
 
 st.header("4️⃣ 결과")
 
@@ -279,18 +323,22 @@ for r in results:
 st.subheader("📊 요약")
 st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
 
-st.subheader("📥 일괄 다운로드 / 인쇄")
+if is_preview:
+    st.success("✅ 미리보기 완료. 양식·수치를 확인하시고 위의 **🚀 PDF 전체 생성** 으로 본 작업을 시작하세요.")
+st.subheader("📥 일괄 다운로드 / 인쇄" + (" (전체 생성 후 활성)" if is_preview else ""))
 c1, c2, c3 = st.columns(3)
 if os.path.exists(merged):
     with open(merged, "rb") as f:
         c1.download_button("📦 합본 PDF", data=f.read(),
             file_name=os.path.basename(merged), mime="application/pdf",
             use_container_width=True)
-if os.path.exists(all_xlsx_zip):
+if (not is_preview) and os.path.exists(all_xlsx_zip):
     with open(all_xlsx_zip, "rb") as f:
         c2.download_button("📊 엑셀 모음 (ZIP)", data=f.read(),
             file_name=os.path.basename(all_xlsx_zip),
             mime="application/zip", use_container_width=True)
+elif is_preview:
+    c2.caption("미리보기 모드 — 전체 생성 시 활성화")
 if printer_name:
     if c3.button("🖨 합본 인쇄", use_container_width=True):
         try:
@@ -331,7 +379,7 @@ for r in results:
         except Exception as e:
             col_prev.warning(f"미리보기 실패: {e}")
 
-        safe = r["folder"].replace("#", "no").replace(" ", "_")
+        safe = r.get("safe") or r["folder"].replace("#", "no").replace(" ", "_")
         with open(r["pdf"], "rb") as f:
             col_btn.download_button("📥 PDF", data=f.read(),
                 file_name=f"{safe}.pdf", mime="application/pdf",
