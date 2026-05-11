@@ -131,6 +131,11 @@ def _sanitize_filename(name: str) -> str:
     return s.strip(" .")
 
 default_rows = []
+# 거래처별 기본값 (제품명·관리번호 양식)
+v_defaults = vendor.get("defaults", {})
+default_product_name = v_defaults.get("product_name", "")
+mgmt_no_template     = v_defaults.get("mgmt_no_template", "")  # "1660-{yymm}-{folder_num}" 같은 형식
+
 for folder in candidate_folders:
     name = os.path.basename(folder)
     m_eq = re.search(r"#(\d+)", name)
@@ -138,11 +143,15 @@ for folder in candidate_folders:
     folder_num = m_no.group(1) if m_no else ""
     yymm = datetime.now().strftime("%y%m")
     default_filename = name.replace("#", "no").replace(" ", "_")
+    if mgmt_no_template and folder_num:
+        default_mgmt = mgmt_no_template.format(yymm=yymm, folder_num=folder_num)
+    else:
+        default_mgmt = ""
     default_rows.append({
         "folder": name,
-        "product_name":    "Si-AT01-1581660",
+        "product_name":    default_product_name,
         "processing_date": today_kr,
-        "mgmt_no":         f"1660-{yymm}-{folder_num}" if folder_num else "",
+        "mgmt_no":         default_mgmt,
         "inspection_date": today_kr,
         "equip_no":        f"{m_eq.group(1)}호기" if m_eq else "",
         "tool_sn":         "",
