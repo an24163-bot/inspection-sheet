@@ -18,6 +18,10 @@
       "round": "<0.02",
       "pos":   "Result (<0.10)",
       "conc":  "Result (<0.10)"
+    },
+    "defaults": {
+      "product_name": "Si-AT01-1581660",
+      "mgmt_no_template": "1660-{yymm}-{folder_num}"
     }
   },
   "solmix": {
@@ -39,6 +43,10 @@
       "round": "최대 ≤ 0.02 , 평균 ≤ 0.01",
       "pos":   "결과 ( 최대 ≤ 0.3 )",
       "conc":  "결과 ( 최대 ≤ 0.2 , 평균 ≤ 0.15 )"
+    },
+    "defaults": {
+      "product_name": "",
+      "mgmt_no_template": ""
     }
   }
 }
